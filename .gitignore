@@ -2,6 +2,7 @@
 *.iml
 .idea*
 
+neo4j-embedded-db/
 target/
 pom.xml.tag
 pom.xml.releaseBackup

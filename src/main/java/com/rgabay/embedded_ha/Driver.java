@@ -5,66 +5,112 @@ import java.io.IOException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import com.beust.jcommander.JCommander;
+import com.rgabay.embedded_ha.util.JCommanderSetup;
 import org.neo4j.graphdb.*;
-import org.neo4j.graphdb.factory.HighlyAvailableGraphDatabaseFactory;
-import org.neo4j.graphdb.factory.GraphDatabaseSettings;
-import org.neo4j.io.fs.FileUtils;
 
-import org.neo4j.cluster.ClusterSettings;
-import org.neo4j.kernel.ha.HaSettings;
+import org.neo4j.graphdb.factory.HighlyAvailableGraphDatabaseFactory;
+import org.neo4j.graphdb.schema.IndexDefinition;
+import org.neo4j.graphdb.schema.Schema;
+import org.neo4j.io.fs.FileUtils;
 
 
 public class Driver
 {
-    private static final String DB_PATH = "target/neo4j-embedded-db";
-    private static final int SERVER_ID_1_VALUE = 1;
-    private static final int SERVER_ID_2_VALUE = 2;
-    private static final int BASE_BOLT_PORT = 7687;
-    private static final int BASE_CLUSTER_PORT = 5000;
-    private static final String INITIAL_HOSTS = "localhost:5001, localhost:5002";
+    private static final String DB_PATH = "neo4j-embedded-db";
+    private static final String CONFIG_FILE = "/Users/rossgabay/neo/ha_instance/neo4j1.conf";
 
     private GraphDatabaseService graphDb;
+    private static String configFile;
+
+
+    private enum RelTypes implements RelationshipType
+    {
+        HAS_FLIGHTS_TO
+    }
 
     public static void main( final String[] args ) throws IOException
     {
 
-        ExecutorService executor = Executors.newFixedThreadPool(2);
+        JCommanderSetup jcommanderSetup = new JCommanderSetup();
+        new JCommander(jcommanderSetup, args);
 
-        Runnable command1 = new InstanceLaunchCommand(SERVER_ID_1_VALUE);
-        Runnable command2 = new InstanceLaunchCommand(SERVER_ID_2_VALUE);
+        configFile = (jcommanderSetup.getConfigFile() == null) ?  CONFIG_FILE : jcommanderSetup.getConfigFile();
 
+        ExecutorService executor = Executors.newFixedThreadPool(1);
+        Runnable command1 = new InstanceLaunchCommand();
         executor.execute(command1);
-        executor.execute(command2);
     }
 
-    void createDb(int instanceId) throws IOException
+    void createDb() throws IOException
     {
-        FileUtils.deleteRecursively( new File(DB_PATH + instanceId) );
+        FileUtils.deleteRecursively( new File(DB_PATH) );
 
-        int boltPort = BASE_BOLT_PORT + instanceId;
-        int clusterServer = BASE_CLUSTER_PORT + instanceId;
+        System.out.printf("launching db instance using config: %s \n", configFile);
 
-        System.out.printf("launching db instance, boltPort = %d and instance id = %d\n", boltPort, instanceId);
-        //graph db with bolt enabled on port 7687 + instanceId
         synchronized (this) {
-            GraphDatabaseSettings.BoltConnector bolt = GraphDatabaseSettings.boltConnector( "" + (instanceId - 1) );
 
             graphDb = new HighlyAvailableGraphDatabaseFactory()
-                    .newEmbeddedDatabaseBuilder(new File(DB_PATH + instanceId))
-                    .setConfig(ClusterSettings.server_id, "" + instanceId) // 1 or 2
-                    .setConfig(ClusterSettings.cluster_server, "localhost:" + clusterServer)
-                    .setConfig(ClusterSettings.cluster_server, "localhost:" + clusterServer)
-                    .setConfig(ClusterSettings.initial_hosts, INITIAL_HOSTS) //localhost:5001 and 5002
-                    .setConfig(HaSettings.pull_interval, "1") //localhost:5001 and 5002
-                    .setConfig(bolt.type, "BOLT")
-                    .setConfig(bolt.enabled, "true")
-                    .setConfig(bolt.listen_address, "localhost:" + boltPort)
+                    .setUserLogProvider( new org.neo4j.logging.slf4j.Slf4jLogProvider() )
+                    .newEmbeddedDatabaseBuilder(new File(DB_PATH))
+                    .loadPropertiesFromFile(configFile)
                     .newGraphDatabase();
         }
 
         registerShutdownHook( graphDb );
+
     }
 
+    void loadData(){
+
+        Node firstNode;
+        Node secondNode;
+        Relationship relationship;
+        Label label;
+
+        IndexDefinition indexDefinition;
+
+        try ( Transaction tx = graphDb.beginTx() )
+        {
+            Schema schema = graphDb.schema();
+            indexDefinition = schema.indexFor( Label.label( "Airport" ) )
+                    .on( "code" )
+                    .create();
+            tx.success();
+        }
+
+        try ( Transaction tx = graphDb.beginTx() )
+        {
+
+            label = Label.label( "Airport" );
+
+            firstNode = graphDb.createNode(label);
+            firstNode.setProperty( "code", "DET" );
+            secondNode = graphDb.createNode(label);
+            secondNode.setProperty( "code", "SFO" );
+
+            relationship = firstNode.createRelationshipTo( secondNode, RelTypes.HAS_FLIGHTS_TO);
+            relationship.setProperty( "class", "business" );
+
+            System.out.printf("%s %s %s %s\n",
+                    firstNode.getProperty( "code" ),
+                    relationship.getType(),
+                    secondNode.getProperty( "code" ),
+                    relationship.getProperty( "class" )
+            );
+
+            tx.success();
+        }
+
+        try ( Transaction tx = graphDb.beginTx() )
+        {
+            Schema schema = graphDb.schema();
+            System.out.println( String.format( "index completion: %1.0f%%",
+                    schema.getIndexPopulationProgress( indexDefinition ).getCompletedPercentage() ) );
+            tx.success();
+        }
+    }
+    
     void shutDown()
     {
         System.out.println();
