@@ -13,7 +13,9 @@ import org.neo4j.graphdb.factory.HighlyAvailableGraphDatabaseFactory;
 import org.neo4j.graphdb.schema.IndexDefinition;
 import org.neo4j.graphdb.schema.Schema;
 import org.neo4j.io.fs.FileUtils;
+import org.neo4j.jmx.JmxUtils;
 
+import javax.management.ObjectName;
 
 public class Driver
 {
@@ -55,6 +57,10 @@ public class Driver
                     .newEmbeddedDatabaseBuilder(new File(DB_PATH))
                     .loadPropertiesFromFile(configFile)
                     .newGraphDatabase();
+
+            ObjectName objectName = JmxUtils.getObjectName(graphDb, "High Availability");
+            String role = JmxUtils.getAttribute( objectName, "Role" );
+            System.out.printf("JMX says, role: %s\n", role);
         }
 
         registerShutdownHook( graphDb );
@@ -77,6 +83,7 @@ public class Driver
                     .on( "code" )
                     .create();
             tx.success();
+
         }
 
         try ( Transaction tx = graphDb.beginTx() )
@@ -85,7 +92,7 @@ public class Driver
             label = Label.label( "Airport" );
 
             firstNode = graphDb.createNode(label);
-            firstNode.setProperty( "code", "DET" );
+            firstNode.setProperty( "code", "DTW" );
             secondNode = graphDb.createNode(label);
             secondNode.setProperty( "code", "SFO" );
 
@@ -96,8 +103,7 @@ public class Driver
                     firstNode.getProperty( "code" ),
                     relationship.getType(),
                     secondNode.getProperty( "code" ),
-                    relationship.getProperty( "class" )
-            );
+                    relationship.getProperty( "class" ));
 
             tx.success();
         }
@@ -109,8 +115,16 @@ public class Driver
                     schema.getIndexPopulationProgress( indexDefinition ).getCompletedPercentage() ) );
             tx.success();
         }
+
+        try ( Transaction tx = graphDb.beginTx() )
+        {
+            Node foundNode =    graphDb.findNode(label, "code", "DTW");
+            System.out.printf("Sanity check, what's the code property value for DTW? -> %s\n ", foundNode.getProperty("code"));
+
+            tx.success();
+        }
     }
-    
+
     void shutDown()
     {
         System.out.println();
