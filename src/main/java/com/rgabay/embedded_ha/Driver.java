@@ -9,6 +9,7 @@ import com.beust.jcommander.JCommander;
 import com.rgabay.embedded_ha.util.JCommanderSetup;
 import org.neo4j.graphdb.*;
 
+import org.neo4j.graphdb.factory.GraphDatabaseSettings;
 import org.neo4j.graphdb.factory.HighlyAvailableGraphDatabaseFactory;
 import org.neo4j.graphdb.schema.IndexDefinition;
 import org.neo4j.graphdb.schema.Schema;
@@ -16,6 +17,11 @@ import org.neo4j.io.fs.FileUtils;
 import org.neo4j.jmx.JmxUtils;
 
 import javax.management.ObjectName;
+
+import org.neo4j.kernel.ha.HaSettings;
+
+import org.neo4j.cluster.ClusterSettings;
+
 
 public class Driver
 {
@@ -52,15 +58,20 @@ public class Driver
 
         synchronized (this) {
 
+            // NOTE: this example loads config props from the file.
+            // To set configs directly on the graph database object use a setConfig() call on the builder with Settings from
+            // GraphDatabaseSettings, ClusterSettings, HaSettings
+            // For example: .setConfig(GraphDatabaseSettings.logs_directory, "/logs")
+
             graphDb = new HighlyAvailableGraphDatabaseFactory()
-                    .setUserLogProvider( new org.neo4j.logging.slf4j.Slf4jLogProvider() )
                     .newEmbeddedDatabaseBuilder(new File(DB_PATH))
                     .loadPropertiesFromFile(configFile)
                     .newGraphDatabase();
 
+
             ObjectName objectName = JmxUtils.getObjectName(graphDb, "High Availability");
             String role = JmxUtils.getAttribute( objectName, "Role" );
-            System.out.printf("JMX says, role: %s\n", role);
+            System.out.printf("JMX says, my role is %s\n", role);
         }
 
         registerShutdownHook( graphDb );
